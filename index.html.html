@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle de Abastecimento</title>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <div class="container py-4">
+    <h2 class="mb-4">Registro de Abastecimento</h2>
+    <form id="formAbastecimento">
+      <div class="mb-3"><label>Marcador Inicial</label><input type="number" step="0.01" class="form-control" id="marcadorInicial" required></div>
+      <div class="mb-3"><label>Marcador Final</label><input type="number" step="0.01" class="form-control" id="marcadorFinal" required></div>
+      <div class="mb-3"><label>Litros</label><input type="number" step="0.01" class="form-control" id="litros" required></div>
+      <div class="mb-3"><label>Máquina</label><input type="text" class="form-control" id="maquina" required></div>
+      <div class="mb-3"><label>Hora Máquina</label><input type="number" step="0.1" class="form-control" id="horaMaquina" required></div>
+      <div class="mb-3"><label>Parte Diário</label><input type="text" class="form-control" id="parteDiario" required></div>
+      <button type="submit" class="btn btn-primary">Registrar</button>
+    </form>
+
+    <div id="alerta" class="mt-3"></div>
+
+    <hr>
+    <h2 class="mt-4">Registros locais (caso não enviados)</h2>
+    <table class="table table-bordered mt-3">
+      <thead>
+        <tr>
+          <th>Data/Hora</th><th>Marcador Inicial</th><th>Marcador Final</th>
+          <th>Litros</th><th>Máquina</th><th>Hora Máquina</th><th>Parte Diário</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="tabelaRegistros"></tbody>
+    </table>
+    <button class="btn btn-secondary" onclick="reenviarPendentes()">🔁 Reenviar pendentes</button>
+    <button class="btn btn-danger" onclick="limparRegistrosLocal()">🧹 Limpar locais</button>
+  </div>
+
+<script>
+const form = document.getElementById('formAbastecimento');
+const tabela = document.getElementById('tabelaRegistros');
+const alerta = document.getElementById('alerta');
+const url = 'https://script.google.com/macros/s/AKfycbxp0sllK6sMlGHfjf80ChnJ1fZ3MkJ7MCaI5GUv4hNvYvsnAG_jAken5uxirwTfxBUg/exec';
+
+let registrosLocais = JSON.parse(localStorage.getItem('registros') || '[]');
+carregarRegistrosLocais();
+
+form.addEventListener('submit', async function(event){
+  event.preventDefault();
+
+  const registro = {
+    dataHora: new Date().toLocaleString(),
+    marcadorInicial: document.getElementById('marcadorInicial').value,
+    marcadorFinal: document.getElementById('marcadorFinal').value,
+    litros: document.getElementById('litros').value,
+    maquina: document.getElementById('maquina').value,
+    horaMaquina: document.getElementById('horaMaquina').value,
+    parteDiario: document.getElementById('parteDiario').value,
+    status: '✅ Enviado'
+  };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(registro)
+    });
+
+    const texto = await res.text();
+    if (texto.trim() !== 'OK') throw new Error('Erro inesperado');
+
+    mostrarAlerta('✅ Registro enviado com sucesso!', 'success');
+  } catch (err) {
+    registro.status = '❌ Pendente';
+    registrosLocais.push(registro);
+    localStorage.setItem('registros', JSON.stringify(registrosLocais));
+    mostrarAlerta('❌ Falha ao enviar. Registro salvo localmente.', 'danger');
+  }
+
+  adicionarRegistroTabela(registro);
+  form.reset();
+});
+
+function mostrarAlerta(msg, tipo) {
+  alerta.innerHTML = `<div class="alert alert-${tipo}" role="alert">${msg}</div>`;
+  setTimeout(() => alerta.innerHTML = '', 4000);
+}
+
+function adicionarRegistroTabela(reg) {
+  const linha = document.createElement('tr');
+  linha.innerHTML = `
+    <td>${reg.dataHora}</td>
+    <td>${reg.marcadorInicial}</td>
+    <td>${reg.marcadorFinal}</td>
+    <td>${reg.litros}</td>
+    <td>${reg.maquina}</td>
+    <td>${reg.horaMaquina}</td>
+    <td>${reg.parteDiario}</td>
+    <td>${reg.status}</td>
+  `;
+  tabela.appendChild(linha);
+}
+
+function carregarRegistrosLocais() {
+  registrosLocais.forEach(adicionarRegistroTabela);
+}
+
+async function reenviarPendentes() {
+  const pendentes = registrosLocais.filter(r => r.status === '❌ Pendente');
+  let reenviados = [];
+
+  for (const reg of pendentes) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reg)
+      });
+      const texto = await res.text();
+      if (texto.trim() === 'OK') {
+        reenviados.push(reg);
+      }
+    } catch (e) {}
+  }
+
+  if (reenviados.length > 0) {
+    registrosLocais = registrosLocais.filter(r => !reenviados.includes(r));
+    localStorage.setItem('registros', JSON.stringify(registrosLocais));
+    mostrarAlerta(`✅ ${reenviados.length} reenviado(s) com sucesso.`, 'success');
+    tabela.innerHTML = '';
+    carregarRegistrosLocais();
+  } else {
+    mostrarAlerta('Nenhum registro foi reenviado com sucesso.', 'warning');
+  }
+}
+
+function limparRegistrosLocal() {
+  if (confirm("Tem certeza que deseja limpar os registros locais?")) {
+    registrosLocais = [];
+    localStorage.removeItem('registros');
+    tabela.innerHTML = '';
+  }
+}
+</script>
+
+</body>
+</html>
